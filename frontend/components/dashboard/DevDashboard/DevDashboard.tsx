@@ -108,11 +108,15 @@ export function DevDashboard() {
         <ChecklistCard
           icon={Laptop}
           title="Device"
-          done={!!myDevice}
-          doneLabel={myDevice?.status === "COMPLIANT" ? "Device compliant" : "Device reported"}
-          pendingLabel="Register your work device so we can track its compliance checks."
+          done={myDevice?.status === "COMPLIANT"}
+          doneLabel="Device compliant"
+          pendingLabel={
+            myDevice
+              ? "Your device is registered — finish the compliance checks below to mark it compliant."
+              : "Register your work device so we can track its compliance checks."
+          }
           href="/data-library/staff-devices"
-          ctaLabel="Report your device"
+          ctaLabel={myDevice ? "View compliance checks" : "Report your device"}
         />
         <ChecklistCard
           icon={Fingerprint}
