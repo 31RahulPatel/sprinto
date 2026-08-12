@@ -31,8 +31,12 @@ services:
     image: minio/minio:latest
     restart: unless-stopped
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin123
+      # Kept in lockstep with the backend's S3_ACCESS_KEY_ID/S3_SECRET_ACCESS_KEY below —
+      # MinIO's own root login IS the S3 credential the backend authenticates with. Only
+      # safe to leave at the minioadmin/minioadmin123 defaults when this port stays off
+      # the public internet; set both in .env before exposing 9000 externally.
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-minioadmin123}
     command: server /data --console-address ":9001"
     ports:
       - "9000:9000"
