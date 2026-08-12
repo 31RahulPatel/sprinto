@@ -112,7 +112,12 @@ export function EvidenceUploader({
       const presignRes = await fetch(`${path}/evidence/presign`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fileName: file.name, mimeType: file.type, sizeBytes: file.size }),
+        body: JSON.stringify({
+          fileName: file.name,
+          name: name.trim(),
+          mimeType: file.type,
+          sizeBytes: file.size,
+        }),
       });
       if (!presignRes.ok) {
         const data = await presignRes.json().catch(() => ({}));

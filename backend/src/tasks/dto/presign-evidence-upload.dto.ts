@@ -6,6 +6,12 @@ export class PresignEvidenceUploadDto {
   @MinLength(1)
   fileName: string;
 
+  // Collected up front (not just at confirm) so it can drive the S3 object key, which is
+  // fixed the moment the presigned URL is issued.
+  @IsString()
+  @MinLength(1)
+  name: string;
+
   @IsIn(EVIDENCE_MIME_TYPES)
   mimeType: string;
 

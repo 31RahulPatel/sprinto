@@ -170,6 +170,7 @@ export class TasksService {
       where: { id, ...ownerWhere(user), ...devScope(user) },
       select: {
         id: true,
+        title: true,
         status: true,
         assigneeId: true,
         entityType: true,
@@ -489,9 +490,15 @@ export class TasksService {
       throw new ForbiddenException('You are not allowed to upload evidence on this task right now');
     }
 
-    const ownerId = task.organizationId ?? task.userId ?? actor.id;
     const evidenceId = randomUUID();
-    const key = this.storage.buildKey(ownerId, id, evidenceId, dto.fileName);
+    const key = this.storage.buildKey({
+      ownerName: actor.organization?.name ?? actor.name,
+      entityTitle: task.title,
+      entityId: id,
+      evidenceId,
+      evidenceName: dto.name,
+      fileName: dto.fileName,
+    });
     const uploadUrl = await this.storage.presignPutUrl(key, dto.mimeType);
     return { evidenceId, uploadUrl };
   }
@@ -509,8 +516,16 @@ export class TasksService {
       throw new ForbiddenException('You are not allowed to upload evidence on this task right now');
     }
 
-    const ownerId = task.organizationId ?? task.userId ?? actor.id;
-    const key = this.storage.buildKey(ownerId, id, evidenceId, dto.fileName);
+    // Recomputed, never trusted from the client — the key an Evidence row points at must be
+    // exactly what presignEvidenceUpload generated for this evidenceId.
+    const key = this.storage.buildKey({
+      ownerName: actor.organization?.name ?? actor.name,
+      entityTitle: task.title,
+      entityId: id,
+      evidenceId,
+      evidenceName: dto.name,
+      fileName: dto.fileName,
+    });
 
     let head;
     try {

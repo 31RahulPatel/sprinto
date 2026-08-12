@@ -23,6 +23,16 @@ function contentDisposition(fileName: string): string {
   return `inline; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
 }
 
+function slugify(value: string, maxLength: number): string {
+  const slug = value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '') // strip combining accents (e.g. "café" -> "cafe")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return (slug || 'untitled').slice(0, maxLength);
+}
+
 @Injectable()
 export class EvidenceStorageService implements OnModuleInit {
   private readonly logger = new Logger(EvidenceStorageService.name);
@@ -105,8 +115,26 @@ export class EvidenceStorageService implements OnModuleInit {
     await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
   }
 
-  buildKey(ownerId: string, parentId: string, evidenceId: string, fileName: string): string {
-    const sanitized = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-    return `evidence/${ownerId}/${parentId}/${evidenceId}-${sanitized}`;
+  // Human-readable path instead of raw UUIDs — folders read as who-and-what, e.g.
+  // evidence/acme-corp/rotate-iam-keys-a1b2c3d4/f3a91c02-key-rotation-screenshot.png. entityId
+  // is suffixed onto the entity folder (as a short prefix) so two tasks/findings with the same
+  // title never collide. evidenceId is generated once at presign time and threaded through
+  // unchanged to confirm, so — unlike a count-derived value — it's guaranteed to reproduce the
+  // exact same key on both ends even if another upload to the same entity completes in between.
+  buildKey(params: {
+    ownerName: string;
+    entityTitle: string;
+    entityId: string;
+    evidenceId: string;
+    evidenceName: string;
+    fileName: string;
+  }): string {
+    const ext = params.fileName.includes('.')
+      ? params.fileName.slice(params.fileName.lastIndexOf('.')).toLowerCase()
+      : '';
+    const ownerSlug = slugify(params.ownerName, 40);
+    const entitySlug = `${slugify(params.entityTitle, 50)}-${params.entityId.slice(0, 8)}`;
+    const nameSlug = slugify(params.evidenceName, 40);
+    return `evidence/${ownerSlug}/${entitySlug}/${params.evidenceId.slice(0, 8)}-${nameSlug}${ext}`;
   }
 }
