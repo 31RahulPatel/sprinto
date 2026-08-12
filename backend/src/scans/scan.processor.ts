@@ -5,6 +5,8 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { mkdir, readdir, readFile, stat } from 'fs/promises';
 import { join } from 'path';
+import { STSClient, AssumeRoleCommand } from '@aws-sdk/client-sts';
+import { S3Client, ListBucketsCommand, GetBucketLocationCommand } from '@aws-sdk/client-s3';
 import { PrismaService } from '../prisma/prisma.service';
 import { decrypt } from '../common/crypto.util';
 import { ControlsService } from '../controls/controls.service';
@@ -13,71 +15,59 @@ import { Severity } from '@prisma/client';
 const execFileAsync = promisify(execFile);
 const discoveryLogger = new Logger('discoverBucketRegions');
 
+function platformCredentials() {
+  return {
+    accessKeyId: process.env.PLATFORM_AWS_ACCESS_KEY_ID ?? '',
+    secretAccessKey: process.env.PLATFORM_AWS_SECRET_ACCESS_KEY ?? '',
+  };
+}
+
 // S3 is a global service (one ListBuckets call returns every bucket regardless of region), so
-// scanning a single hardcoded region would silently miss buckets that live elsewhere. This shells
-// out to the `aws` CLI (same pattern as the `docker` calls below) using the platform identity to
-// find out which regions actually have buckets before invoking Prowler with the real list.
+// scanning a single hardcoded region would silently miss buckets that live elsewhere. Uses the
+// SDK directly (not the `aws` CLI) so the scanner has no external binary dependency beyond
+// Prowler itself — one less thing that has to be installed in the runtime image.
 async function discoverBucketRegions(
   roleArn: string,
   externalId: string,
   fallbackRegion: string,
 ): Promise<string[]> {
-  const platformEnv = {
-    ...process.env,
-    AWS_ACCESS_KEY_ID: process.env.PLATFORM_AWS_ACCESS_KEY_ID,
-    AWS_SECRET_ACCESS_KEY: process.env.PLATFORM_AWS_SECRET_ACCESS_KEY,
-  };
-
   try {
-    // The platform user only has sts:AssumeRole — it must assume the customer's role before it
-    // can call any S3 API in their account, same as Prowler does internally via --role/--external-id.
-    const { stdout: assumeOut } = await execFileAsync(
-      'aws',
-      [
-        'sts',
-        'assume-role',
-        '--role-arn',
-        roleArn,
-        '--external-id',
-        externalId,
-        '--role-session-name',
-        'region-discovery',
-        '--output',
-        'json',
-      ],
-      { env: platformEnv },
+    // The platform identity only has sts:AssumeRole — it must assume the customer's role before
+    // it can call any S3 API in their account, same as Prowler does internally via --role/--external-id.
+    const sts = new STSClient({ region: fallbackRegion, credentials: platformCredentials() });
+    const assumed = await sts.send(
+      new AssumeRoleCommand({
+        RoleArn: roleArn,
+        ExternalId: externalId,
+        RoleSessionName: 'region-discovery',
+      }),
     );
-    const { Credentials } = JSON.parse(assumeOut) as {
-      Credentials: { AccessKeyId: string; SecretAccessKey: string; SessionToken: string };
-    };
-    const assumedEnv = {
-      ...process.env,
-      AWS_ACCESS_KEY_ID: Credentials.AccessKeyId,
-      AWS_SECRET_ACCESS_KEY: Credentials.SecretAccessKey,
-      AWS_SESSION_TOKEN: Credentials.SessionToken,
-    };
+    const creds = assumed.Credentials;
+    if (!creds?.AccessKeyId || !creds.SecretAccessKey || !creds.SessionToken) {
+      throw new Error('AssumeRole did not return usable credentials');
+    }
 
-    const { stdout: listOut } = await execFileAsync(
-      'aws',
-      ['s3api', 'list-buckets', '--query', 'Buckets[].Name', '--output', 'json'],
-      { env: assumedEnv },
-    );
-    const bucketNames: string[] = JSON.parse(listOut);
+    const s3 = new S3Client({
+      region: fallbackRegion,
+      credentials: {
+        accessKeyId: creds.AccessKeyId,
+        secretAccessKey: creds.SecretAccessKey,
+        sessionToken: creds.SessionToken,
+      },
+    });
+
+    const { Buckets } = await s3.send(new ListBucketsCommand({}));
+    const bucketNames = (Buckets ?? []).map((b) => b.Name).filter((n): n is string => !!n);
     if (bucketNames.length === 0) {
       return [fallbackRegion];
     }
 
     const regions = await Promise.all(
       bucketNames.map(async (name) => {
-        const { stdout } = await execFileAsync(
-          'aws',
-          ['s3api', 'get-bucket-location', '--bucket', name, '--output', 'json'],
-          { env: assumedEnv },
-        );
-        const { LocationConstraint } = JSON.parse(stdout) as { LocationConstraint: string | null };
+        const { LocationConstraint } = await s3.send(new GetBucketLocationCommand({ Bucket: name }));
         if (!LocationConstraint) return 'us-east-1';
         if (LocationConstraint === 'EU') return 'eu-west-1';
-        return LocationConstraint;
+        return LocationConstraint as string;
       }),
     );
 
@@ -86,9 +76,8 @@ async function discoverBucketRegions(
     // Discovery is a best-effort optimization; if it fails for any reason, fall back to the
     // account's configured region rather than failing the whole scan over it. Still log the real
     // cause though — a silent fallback here is exactly what made the last failure hard to debug.
-    const stderr = (error as { stderr?: string })?.stderr;
     discoveryLogger.warn(
-      `Region discovery failed, falling back to ${fallbackRegion}: ${stderr || (error as Error)?.message || error}`,
+      `Region discovery failed, falling back to ${fallbackRegion}: ${(error as Error)?.message ?? error}`,
     );
     return [fallbackRegion];
   }
@@ -186,17 +175,6 @@ export class ScanProcessor extends WorkerHost {
       this.logger.log(`Scan ${scanId}: scanning region(s) ${regions.join(', ')}`);
 
       const args = [
-        'run',
-        '--rm',
-        '-e',
-        `AWS_ACCESS_KEY_ID=${process.env.PLATFORM_AWS_ACCESS_KEY_ID}`,
-        '-e',
-        `AWS_SECRET_ACCESS_KEY=${process.env.PLATFORM_AWS_SECRET_ACCESS_KEY}`,
-        '-e',
-        `AWS_DEFAULT_REGION=${regions[0]}`,
-        '-v',
-        `${outputDir}:/output`,
-        'toniblyx/prowler:latest',
         'aws',
         '--role',
         roleArn,
@@ -211,15 +189,25 @@ export class ScanProcessor extends WorkerHost {
         '--output-formats',
         'json-ocsf',
         '--output-directory',
-        '/output',
+        outputDir,
         '--output-filename',
         'scan',
         '--no-banner',
         '--ignore-exit-code-3',
       ];
+      const env = {
+        ...process.env,
+        AWS_ACCESS_KEY_ID: process.env.PLATFORM_AWS_ACCESS_KEY_ID,
+        AWS_SECRET_ACCESS_KEY: process.env.PLATFORM_AWS_SECRET_ACCESS_KEY,
+        AWS_DEFAULT_REGION: regions[0],
+      };
 
-      this.logger.log(`Running Prowler for scan ${scanId}: docker ${args.join(' ')}`);
-      await execFileAsync('docker', args, { maxBuffer: 1024 * 1024 * 50 });
+      // Runs the `prowler` binary installed directly in this image (see backend/Dockerfile) —
+      // deliberately not `docker run toniblyx/prowler`, which would need the backend container
+      // to reach the host's Docker daemon (typically via a bind-mounted socket), handing it
+      // root-equivalent control over every other container on the host, not just this app.
+      this.logger.log(`Running Prowler for scan ${scanId}: prowler ${args.join(' ')}`);
+      await execFileAsync('prowler', args, { maxBuffer: 1024 * 1024 * 50, env });
 
       const files = await readdir(outputDir);
       const jsonFiles = await Promise.all(
