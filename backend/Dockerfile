@@ -20,5 +20,6 @@ COPY --from=build /app/dist ./dist
 # Needed for `prisma migrate deploy` to run inside this image — it reads schema.prisma to
 # locate the migrations folder and datasource, which the compiled dist/ output doesn't carry.
 COPY --from=build /app/prisma ./prisma
+COPY --from=build /app/prisma.config.ts ./prisma.config.ts
 EXPOSE 4000
 CMD ["node", "dist/main"]
