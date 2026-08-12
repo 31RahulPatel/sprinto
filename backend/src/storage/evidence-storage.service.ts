@@ -23,13 +23,15 @@ export class EvidenceStorageService implements OnModuleInit {
     // S3_ENDPOINT is only set for a self-hosted S3-compatible target (MinIO in
     // docker-compose). Leave it unset to talk to real AWS S3 for the given region.
     const endpoint = process.env.S3_ENDPOINT || undefined;
+    const accessKeyId = process.env.S3_ACCESS_KEY_ID;
+    const secretAccessKey = process.env.S3_SECRET_ACCESS_KEY;
     this.client = new S3Client({
       endpoint,
       region: process.env.S3_REGION ?? 'us-east-1',
-      credentials: {
-        accessKeyId: process.env.S3_ACCESS_KEY_ID ?? '',
-        secretAccessKey: process.env.S3_SECRET_ACCESS_KEY ?? '',
-      },
+      // Only pin static credentials when they're actually provided (required for MinIO).
+      // Against real AWS S3, leaving this unset lets the SDK's default credential chain
+      // pick up the EC2 instance role instead — no long-lived keys to manage or leak.
+      ...(accessKeyId && secretAccessKey ? { credentials: { accessKeyId, secretAccessKey } } : {}),
       // Path-style addressing is required for MinIO (no virtual-hosted-style support) but
       // should not be forced against real AWS S3, so key it off whether a custom endpoint
       // is actually in play.
