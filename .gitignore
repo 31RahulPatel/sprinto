@@ -1,0 +1,48 @@
+# dependencies
+node_modules/
+
+# env files
+.env
+.env.*
+!.env.example
+
+# build output
+dist/
+build/
+.next/
+out/
+
+# prisma
+backend/generated/
+
+# logs
+*.log
+npm-debug.log*
+
+# testing / coverage
+coverage/
+
+# real scan output (Prowler OCSF reports) — user-generated runtime data from actual AWS
+# account scans, not source, and may reference real account/resource identifiers
+/reports/
+
+# secrets / credentials, however they show up
+*.pem
+*.key
+*.p12
+*.pfx
+.aws/
+*credentials*.json
+
+# terraform (state files contain resource IDs/outputs, never commit)
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# editors / OS
+.DS_Store
+.vscode/
+.idea/
+.turbo/
+*.tsbuildinfo

@@ -1,0 +1,676 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  DEV
+}
+
+enum UserAccountStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum FindingStatus {
+  OPEN
+  ASSIGNED
+  IN_PROGRESS
+  EVIDENCE_SUBMITTED
+  UNDER_REVIEW
+  RESOLVED
+}
+
+enum FindingActivityType {
+  ASSIGNED
+  REASSIGNED
+  STATUS_CHANGED
+  EVIDENCE_UPLOADED
+  REVIEW_APPROVED
+  REVIEW_REJECTED
+  AUTO_SCAN_STARTED
+  AUTO_SCAN_COMPLETED
+  SCAN_PASSED
+  SCAN_FAILED
+}
+
+enum CloudProvider {
+  AWS
+  AZURE
+  GCP
+}
+
+enum ScanStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum Severity {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+  INFO
+}
+
+enum ReportType {
+  PDF
+  CSV
+  HTML
+}
+
+enum IntegrationProvider {
+  BITBUCKET
+}
+
+enum IntegrationStatus {
+  CONNECTED
+  DISCONNECTED
+  ERROR
+}
+
+enum SyncStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum EvidenceType {
+  SCREENSHOT
+  PDF
+  DOCUMENT
+  REPORT
+  OTHER
+}
+
+enum EvidenceVerificationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  AUTO_VERIFIED
+  VERIFICATION_FAILED
+}
+
+enum VerificationMethod {
+  AUTOMATIC
+  MANUAL
+}
+
+enum EvidenceVerificationMode {
+  AUTO_WITH_FALLBACK
+  AUTO_ONLY
+  MANUAL_ONLY
+}
+
+enum TaskStatus {
+  OPEN
+  ASSIGNED
+  IN_PROGRESS
+  EVIDENCE_SUBMITTED
+  UNDER_REVIEW
+  RESOLVED
+}
+
+enum RecordActivityType {
+  RECORD_CREATED
+  RECORD_UPDATED
+  TASK_CREATED
+  CONTROL_LINKED
+  ASSIGNED
+  REASSIGNED
+  STATUS_CHANGED
+  EVIDENCE_UPLOADED
+  REVIEW_APPROVED
+  REVIEW_REJECTED
+}
+
+enum VulnerabilityStatus {
+  OPEN
+  IN_REMEDIATION
+  RESOLVED
+  ACCEPTED_RISK
+}
+
+enum PersonStatus {
+  ACTIVE
+  OFFBOARDING
+  INACTIVE
+}
+
+enum StaffDeviceStatus {
+  PENDING
+  COMPLIANT
+}
+
+model User {
+  id                       String                   @id @default(uuid())
+  name                     String
+  email                    String                   @unique
+  passwordHash             String
+  role                     Role                     @default(DEV)
+  status                   UserAccountStatus        @default(ACTIVE)
+  evidenceVerificationMode EvidenceVerificationMode @default(AUTO_WITH_FALLBACK)
+  createdAt                DateTime                 @default(now())
+  updatedAt                DateTime                 @updatedAt
+
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+
+  auditLogs                    AuditLog[]
+  cloudAccounts                CloudAccount[]
+  scans                        Scan[]
+  assignedFindings             Finding[]         @relation("FindingAssignee")
+  assignmentsMade              Finding[]         @relation("FindingAssignedBy")
+  uploadedEvidence             Evidence[]
+  reviewedEvidence             Evidence[]        @relation("EvidenceReviewer")
+  findingActivity              FindingActivity[]
+  integrations                 Integration[]
+  controls                     Control[]
+  tasks                        Task[]            @relation("TaskOwner")
+  assignedTasks                Task[]            @relation("TaskAssignee")
+  taskAssignmentsMade          Task[]            @relation("TaskAssignedBy")
+  recordActivity               RecordActivity[]
+  vulnerabilities              Vulnerability[]   @relation("VulnerabilityOwner")
+  assignedVulnerabilities      Vulnerability[]   @relation("VulnerabilityAssignee")
+  vulnerabilityAssignmentsMade Vulnerability[]   @relation("VulnerabilityAssignedBy")
+  people                       Person[]          @relation("PersonOwner")
+  assignedPeople               Person[]          @relation("PersonAssignee")
+  peopleAssignmentsMade        Person[]          @relation("PersonAssignedBy")
+  linkedPersonRecord           Person?           @relation("PersonLinkedUser")
+  staffDevices                 StaffDevice[]     @relation("StaffDeviceOwner")
+  ownedStaffDevice             StaffDevice?      @relation("StaffDeviceEmployee")
+  policies                     Policy[]          @relation("PolicyOwner")
+  policyAcceptances            PolicyAcceptance[]
+  trainings                    Training[]        @relation("TrainingOwner")
+  trainingCompletions          TrainingCompletion[]
+}
+
+model Organization {
+  id                       String                   @id @default(uuid())
+  name                     String
+  evidenceVerificationMode EvidenceVerificationMode @default(AUTO_WITH_FALLBACK)
+  createdAt                DateTime                 @default(now())
+
+  users           User[]
+  cloudAccounts   CloudAccount[]
+  scans           Scan[]
+  integrations    Integration[]
+  controls        Control[]
+  tasks           Task[]
+  vulnerabilities Vulnerability[]
+  people          Person[]
+  staffDevices    StaffDevice[]
+  policies        Policy[]
+  trainings       Training[]
+}
+
+model CloudAccount {
+  id                   String        @id @default(uuid())
+  organizationId       String?
+  organization         Organization? @relation(fields: [organizationId], references: [id])
+  userId               String?
+  user                 User?         @relation(fields: [userId], references: [id])
+  provider             CloudProvider
+  accountId            String
+  displayName          String?
+  region               String
+  credentialsEncrypted String
+  createdAt            DateTime      @default(now())
+
+  scans Scan[]
+}
+
+model Scan {
+  id             String        @id @default(uuid())
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  userId         String?
+  user           User?         @relation(fields: [userId], references: [id])
+  cloudAccountId String
+  cloudAccount   CloudAccount  @relation(fields: [cloudAccountId], references: [id], onDelete: Cascade)
+  provider       CloudProvider
+  service        String
+  status         ScanStatus    @default(QUEUED)
+  startedAt      DateTime?
+  completedAt    DateTime?
+  reportPath     String?
+  errorMessage   String?
+  totalChecks    Int?
+  createdAt      DateTime      @default(now())
+
+  verifiesFindingId  String?
+  verifiesFinding    Finding?  @relation("FindingVerificationScan", fields: [verifiesFindingId], references: [id])
+  verifiesEvidenceId String?
+  verifiesEvidence   Evidence? @relation("EvidenceVerificationScan", fields: [verifiesEvidenceId], references: [id])
+
+  findings Finding[]
+  report   Report?
+}
+
+model Finding {
+  id          String        @id @default(uuid())
+  scanId      String
+  scan        Scan          @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  title       String
+  description String
+  severity    Severity
+  status      FindingStatus @default(OPEN)
+  resource    String
+  service     String
+  category    String
+  frameworks  String[]
+  remediation String
+  createdAt   DateTime      @default(now())
+
+  assigneeId      String?
+  assignee        User?     @relation("FindingAssignee", fields: [assigneeId], references: [id])
+  assignedById    String?
+  assignedBy      User?     @relation("FindingAssignedBy", fields: [assignedById], references: [id])
+  assignedAt      DateTime?
+  resolvedAt      DateTime?
+  rejectionReason String?
+  dueDate         DateTime?
+
+  controlId String?
+  control   Control? @relation(fields: [controlId], references: [id])
+
+  evidence          Evidence[]
+  activity          FindingActivity[]
+  verificationScans Scan[]            @relation("FindingVerificationScan")
+}
+
+model Evidence {
+  id           String   @id @default(uuid())
+  findingId    String?
+  finding      Finding? @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  taskId       String?
+  task         Task?    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  uploadedById String
+  uploadedBy   User     @relation(fields: [uploadedById], references: [id])
+  key          String
+  fileName     String
+  mimeType     String
+  sizeBytes    Int
+  note         String?
+  createdAt    DateTime @default(now())
+
+  name               String
+  type               EvidenceType
+  version            Int                        @default(1)
+  verificationStatus EvidenceVerificationStatus @default(PENDING)
+  verificationMethod VerificationMethod?
+  verifiedAt         DateTime?
+  reviewerId         String?
+  reviewer           User?                      @relation("EvidenceReviewer", fields: [reviewerId], references: [id])
+  rejectionReason    String?
+
+  verificationScans Scan[] @relation("EvidenceVerificationScan")
+
+  @@index([taskId])
+}
+
+model Control {
+  id             String        @id @default(uuid())
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  userId         String?
+  user           User?         @relation(fields: [userId], references: [id])
+  code           String
+  name           String?
+  framework      String?
+  createdAt      DateTime      @default(now())
+
+  findings        Finding[]
+  tasks           Task[]
+  vulnerabilities Vulnerability[]
+  people          Person[]
+  staffDevices    StaffDevice[]
+}
+
+model FindingActivity {
+  id         String              @id @default(uuid())
+  findingId  String
+  finding    Finding             @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  actorId    String
+  actor      User                @relation(fields: [actorId], references: [id])
+  type       FindingActivityType
+  fromStatus FindingStatus?
+  toStatus   FindingStatus?
+  note       String?
+  createdAt  DateTime            @default(now())
+}
+
+model Report {
+  id        String     @id @default(uuid())
+  scanId    String     @unique
+  scan      Scan       @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  type      ReportType
+  location  String
+  createdAt DateTime   @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  action    String
+  timestamp DateTime @default(now())
+  ipAddress String
+}
+
+// Generic unit of work — used by any Data Library module (Vulnerability, Person, ...)
+// that needs actionable follow-up not tied to a cloud Scan. Findings keep their own
+// dedicated assignment/status fields untouched; Task is additive, not a replacement.
+model Task {
+  id             String        @id @default(uuid())
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  userId         String?
+  user           User?         @relation("TaskOwner", fields: [userId], references: [id])
+
+  title       String
+  description String?
+  status      TaskStatus @default(OPEN)
+  priority    Severity?
+
+  assigneeId      String?
+  assignee        User?     @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  assignedById    String?
+  assignedBy      User?     @relation("TaskAssignedBy", fields: [assignedById], references: [id])
+  assignedAt      DateTime?
+  resolvedAt      DateTime?
+  rejectionReason String?
+  dueDate         DateTime?
+
+  controlId String?
+  control   Control? @relation(fields: [controlId], references: [id])
+
+  // Polymorphic parent — a plain string pair, not a named FK per module, so that adding
+  // module 3..9 never requires a migration on this shared table. See Work-list.md / the
+  // Data Library spine plan for the tradeoff this accepts (no DB-level referential
+  // integrity or auto-generated `.tasks` include on the parent — queried explicitly by
+  // entityType/entityId instead).
+  entityType String?
+  entityId   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  evidence Evidence[]
+
+  @@index([entityType, entityId])
+  @@index([assigneeId])
+  @@index([organizationId])
+  @@index([userId])
+}
+
+// Polymorphic audit trail for Task and any Data Library module record. Findings keep
+// writing to their own FindingActivity (richer, strongly-typed to FindingStatus) —
+// untouched. fromStatus/toStatus are plain strings here because this table logs against
+// several different status enums (TaskStatus, VulnerabilityStatus, PersonStatus, ...);
+// validity is enforced at the application layer, not the database.
+model RecordActivity {
+  id         String             @id @default(uuid())
+  entityType String
+  entityId   String
+  actorId    String
+  actor      User               @relation(fields: [actorId], references: [id])
+  type       RecordActivityType
+  fromStatus String?
+  toStatus   String?
+  note       String?
+  createdAt  DateTime           @default(now())
+
+  @@index([entityType, entityId, createdAt])
+}
+
+model Vulnerability {
+  id             String        @id @default(uuid())
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  userId         String?
+  user           User?         @relation("VulnerabilityOwner", fields: [userId], references: [id])
+
+  title         String
+  description   String
+  severity      Severity
+  status        VulnerabilityStatus @default(OPEN)
+  source        String?
+  affectedAsset String?
+  cveId         String?
+
+  assigneeId   String?
+  assignee     User?     @relation("VulnerabilityAssignee", fields: [assigneeId], references: [id])
+  assignedById String?
+  assignedBy   User?     @relation("VulnerabilityAssignedBy", fields: [assignedById], references: [id])
+  assignedAt   DateTime?
+  resolvedAt   DateTime?
+  dueDate      DateTime?
+
+  controlId String?
+  control   Control? @relation(fields: [controlId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([controlId])
+}
+
+model Person {
+  id             String        @id @default(uuid())
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  userId         String?
+  user           User?         @relation("PersonOwner", fields: [userId], references: [id])
+
+  fullName       String
+  email          String
+  jobTitle       String?
+  department     String?
+  employmentType String?
+  status         PersonStatus @default(ACTIVE)
+  startDate      DateTime?
+  endDate        DateTime?
+
+  linkedUserId String? @unique
+  linkedUser   User?   @relation("PersonLinkedUser", fields: [linkedUserId], references: [id])
+
+  assigneeId   String?
+  assignee     User?     @relation("PersonAssignee", fields: [assigneeId], references: [id])
+  assignedById String?
+  assignedBy   User?     @relation("PersonAssignedBy", fields: [assignedById], references: [id])
+  assignedAt   DateTime?
+
+  controlId String?
+  control   Control? @relation(fields: [controlId], references: [id])
+
+  managerId     String?
+  manager       Person?  @relation("PersonManager", fields: [managerId], references: [id])
+  directReports Person[] @relation("PersonManager")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([controlId])
+  @@index([managerId])
+}
+
+// Self-registered by the employee it belongs to — ownerId is always the registering user,
+// distinct from userId (which is the dual org/user tenant-ownership field every other model
+// uses). One device per employee for now (@@unique on ownerId); the 3 compliance checks are
+// generic Tasks (entityType='STAFF_DEVICE') created with fixed titles from
+// common/staff-device-checks.ts, so no schema change is needed to add/remove a check later.
+model StaffDevice {
+  id             String        @id @default(uuid())
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  userId         String?
+  user           User?         @relation("StaffDeviceOwner", fields: [userId], references: [id])
+
+  ownerId String @unique
+  owner   User   @relation("StaffDeviceEmployee", fields: [ownerId], references: [id])
+
+  deviceName String
+  os         String
+  osVersion  String?
+  status     StaffDeviceStatus @default(PENDING)
+
+  controlId String?
+  control   Control? @relation(fields: [controlId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([controlId])
+}
+
+model Integration {
+  id              String              @id @default(uuid())
+  organizationId  String?
+  organization    Organization?       @relation(fields: [organizationId], references: [id])
+  userId          String?
+  user            User?               @relation(fields: [userId], references: [id])
+  provider        IntegrationProvider
+  status          IntegrationStatus   @default(CONNECTED)
+  workspaceSlug   String?
+  workspaceName   String?
+  tokensEncrypted String
+  errorMessage    String?
+  lastSyncedAt    DateTime?
+  createdAt       DateTime            @default(now())
+
+  repositories BitbucketRepository[]
+  members      IntegrationMember[]
+  syncJobs     IntegrationSync[]
+}
+
+model BitbucketRepository {
+  id              String      @id @default(uuid())
+  integrationId   String
+  integration     Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  slug            String
+  name            String
+  isPrivate       Boolean     @default(true)
+  mainBranch      String?
+  selectedForScan Boolean     @default(false)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  branches BitbucketBranch[]
+
+  @@unique([integrationId, slug])
+}
+
+model BitbucketBranch {
+  id                String              @id @default(uuid())
+  repositoryId      String
+  repository        BitbucketRepository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  name              String
+  isMainBranch      Boolean             @default(false)
+  requiresApprovals Boolean             @default(false)
+  minApprovals      Int?
+  syncedAt          DateTime            @default(now())
+
+  @@unique([repositoryId, name])
+}
+
+model IntegrationMember {
+  id            String      @id @default(uuid())
+  integrationId String
+  integration   Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  accountId     String
+  displayName   String
+  permission    String
+  syncedAt      DateTime    @default(now())
+
+  @@unique([integrationId, accountId])
+}
+
+model IntegrationSync {
+  id            String      @id @default(uuid())
+  integrationId String
+  integration   Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  status        SyncStatus  @default(QUEUED)
+  startedAt     DateTime?
+  completedAt   DateTime?
+  repoCount     Int?
+  errorMessage  String?
+  createdAt     DateTime    @default(now())
+}
+
+// Authored by an Admin/Super Admin, must be accepted by every org member. version is bumped
+// on every content edit so a stale acceptance (accepted before the latest edit) is no longer
+// considered current — see PoliciesService for how "pending" vs "accepted" is derived.
+model Policy {
+  id             String        @id @default(uuid())
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  userId         String?
+  user           User?         @relation("PolicyOwner", fields: [userId], references: [id])
+
+  title     String
+  content   String
+  version   Int      @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  acceptances PolicyAcceptance[]
+}
+
+model PolicyAcceptance {
+  id         String   @id @default(uuid())
+  policyId   String
+  policy     Policy   @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  version    Int
+  acceptedAt DateTime @default(now())
+
+  @@unique([policyId, userId, version])
+}
+
+// Authored by an Admin/Super Admin; unlike Policy this isn't versioned — no re-completion
+// requirement was asked for.
+model Training {
+  id             String        @id @default(uuid())
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  userId         String?
+  user           User?         @relation("TrainingOwner", fields: [userId], references: [id])
+
+  title       String
+  description String
+  resourceUrl String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  completions TrainingCompletion[]
+}
+
+model TrainingCompletion {
+  id          String   @id @default(uuid())
+  trainingId  String
+  training    Training @relation(fields: [trainingId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  completedAt DateTime @default(now())
+
+  @@unique([trainingId, userId])
+}

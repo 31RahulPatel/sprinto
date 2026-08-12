@@ -1,0 +1,1 @@
+export { RegisterDeviceForm } from "./RegisterDeviceForm";

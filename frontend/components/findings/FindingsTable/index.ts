@@ -1,0 +1,1 @@
+export { FindingsTable } from "./FindingsTable";

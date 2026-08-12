@@ -1,0 +1,99 @@
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import {
+  S3Client,
+  HeadBucketCommand,
+  CreateBucketCommand,
+  PutObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  DeleteObjectCommand,
+} from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+
+const PRESIGN_EXPIRY_SECONDS = 300;
+
+@Injectable()
+export class EvidenceStorageService implements OnModuleInit {
+  private readonly logger = new Logger(EvidenceStorageService.name);
+  private readonly client: S3Client;
+  private readonly bucket: string;
+
+  constructor() {
+    this.bucket = process.env.S3_BUCKET ?? 'compliance-evidence';
+    // S3_ENDPOINT is only set for a self-hosted S3-compatible target (MinIO in
+    // docker-compose). Leave it unset to talk to real AWS S3 for the given region.
+    const endpoint = process.env.S3_ENDPOINT || undefined;
+    this.client = new S3Client({
+      endpoint,
+      region: process.env.S3_REGION ?? 'us-east-1',
+      credentials: {
+        accessKeyId: process.env.S3_ACCESS_KEY_ID ?? '',
+        secretAccessKey: process.env.S3_SECRET_ACCESS_KEY ?? '',
+      },
+      // Path-style addressing is required for MinIO (no virtual-hosted-style support) but
+      // should not be forced against real AWS S3, so key it off whether a custom endpoint
+      // is actually in play.
+      forcePathStyle: Boolean(endpoint),
+    });
+  }
+
+  async onModuleInit() {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        await this.ensureBucket();
+        return;
+      } catch (err) {
+        if (attempt === 3) {
+          this.logger.error(
+            `Failed to provision evidence bucket "${this.bucket}" after ${attempt} attempts`,
+            err as Error,
+          );
+          throw err;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+    }
+  }
+
+  private async ensureBucket() {
+    try {
+      await this.client.send(new HeadBucketCommand({ Bucket: this.bucket }));
+    } catch {
+      await this.client.send(new CreateBucketCommand({ Bucket: this.bucket }));
+      this.logger.log(`Created evidence bucket "${this.bucket}"`);
+    }
+  }
+
+  // Setting ContentType on the signed command means the browser's PUT must send that exact
+  // Content-Type header or S3 rejects the signature — this is what keeps the declared MIME
+  // type honest without the app ever touching the file's bytes.
+  async presignPutUrl(key: string, mimeType: string): Promise<string> {
+    const command = new PutObjectCommand({ Bucket: this.bucket, Key: key, ContentType: mimeType });
+    return getSignedUrl(this.client, command, { expiresIn: PRESIGN_EXPIRY_SECONDS });
+  }
+
+  async presignGetUrl(key: string, fileName: string, mimeType: string): Promise<string> {
+    const command = new GetObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+      ResponseContentDisposition: `inline; filename="${fileName}"`,
+      ResponseContentType: mimeType,
+    });
+    return getSignedUrl(this.client, command, { expiresIn: PRESIGN_EXPIRY_SECONDS });
+  }
+
+  // Authoritative read of what actually landed in S3 after a presigned PUT — never trust the
+  // client's declared size/type for the DB record.
+  async headObject(key: string) {
+    return this.client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key }));
+  }
+
+  async deleteObject(key: string): Promise<void> {
+    await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
+  }
+
+  buildKey(ownerId: string, parentId: string, evidenceId: string, fileName: string): string {
+    const sanitized = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+    return `evidence/${ownerId}/${parentId}/${evidenceId}-${sanitized}`;
+  }
+}

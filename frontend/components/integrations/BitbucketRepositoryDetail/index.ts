@@ -1,0 +1,1 @@
+export { BitbucketRepositoryDetail } from "./BitbucketRepositoryDetail";

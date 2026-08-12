@@ -1,0 +1,1 @@
+export { EvidenceVerificationSettings } from "./EvidenceVerificationSettings";

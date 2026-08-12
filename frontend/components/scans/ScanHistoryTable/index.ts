@@ -1,0 +1,1 @@
+export { ScanHistoryTable } from "./ScanHistoryTable";

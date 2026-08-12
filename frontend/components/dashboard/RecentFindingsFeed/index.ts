@@ -1,0 +1,1 @@
+export { RecentFindingsFeed } from "./RecentFindingsFeed";
