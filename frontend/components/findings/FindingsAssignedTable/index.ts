@@ -1,0 +1,1 @@
+export { FindingsAssignedTable } from "./FindingsAssignedTable";

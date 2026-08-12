@@ -12,6 +12,17 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 const PRESIGN_EXPIRY_SECONDS = 300;
 
+// S3 sets this string as a literal HTTP response header, which — per HTTP/1.1 — must be
+// representable in ISO-8859-1. macOS screenshot filenames routinely contain a narrow no-break
+// space (U+202F) between the time and AM/PM, which falls outside that range and made every
+// such preview/download fail with an InvalidArgument error. RFC 6266's filename* form carries
+// the real name percent-encoded (pure ASCII, always valid), with an ASCII-only fallback name
+// for the few clients that don't understand it.
+function contentDisposition(fileName: string): string {
+  const asciiFallback = fileName.replace(/[^\x20-\x7E]/g, '_').replace(/"/g, "'");
+  return `inline; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+}
+
 @Injectable()
 export class EvidenceStorageService implements OnModuleInit {
   private readonly logger = new Logger(EvidenceStorageService.name);
@@ -78,7 +89,7 @@ export class EvidenceStorageService implements OnModuleInit {
     const command = new GetObjectCommand({
       Bucket: this.bucket,
       Key: key,
-      ResponseContentDisposition: `inline; filename="${fileName}"`,
+      ResponseContentDisposition: contentDisposition(fileName),
       ResponseContentType: mimeType,
     });
     return getSignedUrl(this.client, command, { expiresIn: PRESIGN_EXPIRY_SECONDS });

@@ -7,6 +7,8 @@ import { ChevronDown, Cloud, Library } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAssignedTasks } from "@/hooks/useAssignedTasks";
 import { useAssignedGenericTasks } from "@/hooks/useAssignedGenericTasks";
+import { useFindingsNeedingReview } from "@/hooks/useFindingsNeedingReview";
+import { useTasksNeedingReview } from "@/hooks/useTasksNeedingReview";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { SERVICE_NAV_ITEMS, getVisibleNav } from "../nav-items";
 
@@ -92,7 +94,10 @@ export function Sidebar() {
   const [dataLibraryOpen, setDataLibraryOpen] = useState(isOnDataLibraryPage);
   const { pendingCount: findingPendingCount } = useAssignedTasks();
   const { pendingCount: genericPendingCount } = useAssignedGenericTasks();
-  const pendingCount = findingPendingCount + genericPendingCount;
+  const { pendingCount: findingReviewCount } = useFindingsNeedingReview();
+  const { pendingCount: taskReviewCount } = useTasksNeedingReview();
+  const pendingCount =
+    findingPendingCount + genericPendingCount + findingReviewCount + taskReviewCount;
 
   return (
     <aside className="hidden md:flex w-60 shrink-0 flex-col bg-sidebar text-sidebar-foreground">
