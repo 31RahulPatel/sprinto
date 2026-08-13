@@ -15,11 +15,13 @@ import { Severity } from '@prisma/client';
 const execFileAsync = promisify(execFile);
 const discoveryLogger = new Logger('discoverBucketRegions');
 
+// Only pin static credentials when they're actually configured. Leaving them unset lets the
+// SDK's default credential chain fall back to the EC2 instance role instead (see
+// evidence-storage.service.ts for the same pattern) — no long-lived platform key to manage.
 function platformCredentials() {
-  return {
-    accessKeyId: process.env.PLATFORM_AWS_ACCESS_KEY_ID ?? '',
-    secretAccessKey: process.env.PLATFORM_AWS_SECRET_ACCESS_KEY ?? '',
-  };
+  const accessKeyId = process.env.PLATFORM_AWS_ACCESS_KEY_ID;
+  const secretAccessKey = process.env.PLATFORM_AWS_SECRET_ACCESS_KEY;
+  return accessKeyId && secretAccessKey ? { accessKeyId, secretAccessKey } : undefined;
 }
 
 // S3 is a global service (one ListBuckets call returns every bucket regardless of region), so
